@@ -1,0 +1,216 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#111111">
+<title>Calories</title>
+<style>
+  :root {
+    --bg: #ffffff;
+    --fg: #111111;
+    --muted: #6b7280;
+    --line: #e5e7eb;
+    --field: #ffffff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #111111;
+      --fg: #f5f5f5;
+      --muted: #9ca3af;
+      --line: #2e2e2e;
+      --field: #1b1b1b;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 24px 16px 48px;
+    background: var(--bg);
+    color: var(--fg);
+    font: 16px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    max-width: 480px;
+    margin-inline: auto;
+  }
+  h1 {
+    font-size: 14px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin: 0 0 8px;
+  }
+  #total {
+    font-size: 64px;
+    font-weight: 700;
+    line-height: 1;
+    margin: 0 0 4px;
+    font-variant-numeric: tabular-nums;
+  }
+  #today { color: var(--muted); font-size: 14px; margin: 0 0 24px; }
+  form { display: flex; gap: 8px; margin: 0 0 16px; }
+  input, button {
+    font: inherit;
+    border-radius: 10px;
+    border: 1px solid var(--line);
+    min-height: 52px;
+  }
+  input {
+    flex: 1;
+    width: 100%;
+    padding: 0 14px;
+    background: var(--field);
+    color: var(--fg);
+    font-size: 20px;
+    font-variant-numeric: tabular-nums;
+  }
+  button {
+    padding: 0 20px;
+    background: var(--fg);
+    color: var(--bg);
+    border-color: var(--fg);
+    font-weight: 600;
+    cursor: pointer;
+  }
+  #reset {
+    background: none;
+    color: var(--muted);
+    border-color: var(--line);
+    width: 100%;
+    font-weight: 400;
+  }
+  h2 {
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin: 40px 0 8px;
+  }
+  ul { list-style: none; margin: 0; padding: 0; }
+  li {
+    display: flex;
+    justify-content: space-between;
+    padding: 12px 0;
+    border-bottom: 1px solid var(--line);
+    font-variant-numeric: tabular-nums;
+  }
+  li span:first-child { color: var(--muted); }
+  #empty { color: var(--muted); font-size: 14px; }
+</style>
+</head>
+<body>
+  <h1>Today</h1>
+  <p id="total">0</p>
+  <p id="today"></p>
+
+  <form id="add">
+    <input id="amount" type="number" inputmode="numeric" step="1" min="0" placeholder="Calories" required>
+    <button type="submit">Add</button>
+  </form>
+  <button id="reset" type="button">Reset today</button>
+
+  <h2>Previous days</h2>
+  <ul id="history"></ul>
+  <p id="empty">Nothing yet.</p>
+
+<script>
+(function () {
+  var KEY = 'calorie-counter';
+
+  function todayKey() {
+    var d = new Date();
+    return d.getFullYear() + '-' +
+      String(d.getMonth() + 1).padStart(2, '0') + '-' +
+      String(d.getDate()).padStart(2, '0');
+  }
+
+  function load() {
+    var state = { date: todayKey(), total: 0, history: [] };
+    try {
+      var raw = localStorage.getItem(KEY);
+      if (raw) {
+        var saved = JSON.parse(raw);
+        if (saved && typeof saved === 'object') {
+          state.date = typeof saved.date === 'string' ? saved.date : state.date;
+          state.total = Number(saved.total) || 0;
+          state.history = Array.isArray(saved.history) ? saved.history : [];
+        }
+      }
+    } catch (e) { /* corrupt or unavailable storage: start fresh */ }
+
+    // New day: archive yesterday's total and start over.
+    if (state.date !== todayKey()) {
+      state.history.unshift({ date: state.date, total: state.total });
+      state.history = state.history.slice(0, 60);
+      state.date = todayKey();
+      state.total = 0;
+      save(state);
+    }
+    return state;
+  }
+
+  function save(state) {
+    try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) { /* ignore */ }
+  }
+
+  function formatDate(key) {
+    var parts = key.split('-');
+    var d = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+    return d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+  }
+
+  var state = load();
+  var totalEl = document.getElementById('total');
+  var todayEl = document.getElementById('today');
+  var historyEl = document.getElementById('history');
+  var emptyEl = document.getElementById('empty');
+  var amountEl = document.getElementById('amount');
+
+  function render() {
+    totalEl.textContent = state.total;
+    todayEl.textContent = formatDate(state.date);
+    historyEl.innerHTML = '';
+    state.history.forEach(function (day) {
+      var li = document.createElement('li');
+      var d = document.createElement('span');
+      d.textContent = formatDate(day.date);
+      var t = document.createElement('span');
+      t.textContent = day.total;
+      li.appendChild(d);
+      li.appendChild(t);
+      historyEl.appendChild(li);
+    });
+    emptyEl.hidden = state.history.length > 0;
+  }
+
+  document.getElementById('add').addEventListener('submit', function (e) {
+    e.preventDefault();
+    var n = Number(amountEl.value);
+    if (!isFinite(n) || n === 0) return;
+    state.total += Math.round(n);
+    save(state);
+    render();
+    amountEl.value = '';
+    amountEl.blur();
+  });
+
+  document.getElementById('reset').addEventListener('click', function () {
+    state.total = 0;
+    save(state);
+    render();
+  });
+
+  // Coming back to the tab after midnight should roll the day over.
+  document.addEventListener('visibilitychange', function () {
+    if (!document.hidden && state.date !== todayKey()) {
+      state = load();
+      render();
+    }
+  });
+
+  render();
+})();
+</script>
+</body>
+</html>
