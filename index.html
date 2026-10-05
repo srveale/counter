@@ -47,7 +47,6 @@
     margin: 0 0 4px;
     font-variant-numeric: tabular-nums;
   }
-  #today { color: var(--muted); font-size: 14px; margin: 0 0 24px; }
   form { display: flex; gap: 8px; margin: 0 0 16px; }
   input, button {
     font: inherit;
@@ -88,21 +87,55 @@
     margin: 40px 0 8px;
   }
   ul { list-style: none; margin: 0; padding: 0; }
-  li {
+  li { border-bottom: 1px solid var(--line); }
+  #empty { color: var(--muted); font-size: 14px; }
+  .day {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin: 0 0 24px;
+  }
+  #day {
+    min-height: 40px;
+    padding: 0 10px;
+    font-size: 15px;
+    background: var(--field);
+    color: var(--fg);
+  }
+  .link {
+    min-height: 40px;
+    padding: 0;
+    background: none;
+    border: 0;
+    color: var(--muted);
+    font-weight: 400;
+    text-decoration: underline;
+  }
+  li button {
     display: flex;
     justify-content: space-between;
+    width: 100%;
+    min-height: 0;
     padding: 12px 0;
-    border-bottom: 1px solid var(--line);
+    background: none;
+    border: 0;
+    border-radius: 0;
+    color: var(--fg);
+    font-weight: 400;
+    text-align: left;
     font-variant-numeric: tabular-nums;
   }
-  li span:first-child { color: var(--muted); }
-  #empty { color: var(--muted); font-size: 14px; }
+  li button span:first-child { color: var(--muted); }
+  li button[aria-current="true"] span { font-weight: 700; color: var(--fg); }
 </style>
 </head>
 <body>
-  <h1>Today</h1>
+  <h1 id="label">Today</h1>
   <p id="total">0</p>
-  <p id="today"></p>
+  <div class="day">
+    <input id="day" type="date" aria-label="Day">
+    <button id="back" class="link" type="button" hidden>Back to today</button>
+  </div>
 
   <form id="add">
     <input id="amount" type="number" inputmode="numeric" step="1" min="0" placeholder="Calories" required>
@@ -118,40 +151,39 @@
 (function () {
   var KEY = 'calorie-counter';
 
-  function todayKey() {
-    var d = new Date();
+  function dateKey(d) {
     return d.getFullYear() + '-' +
       String(d.getMonth() + 1).padStart(2, '0') + '-' +
       String(d.getDate()).padStart(2, '0');
   }
 
+  function todayKey() { return dateKey(new Date()); }
+
+  // Stored as { days: { "YYYY-MM-DD": total } }.
   function load() {
-    var state = { date: todayKey(), total: 0, history: [] };
+    var days = {};
     try {
-      var raw = localStorage.getItem(KEY);
-      if (raw) {
-        var saved = JSON.parse(raw);
-        if (saved && typeof saved === 'object') {
-          state.date = typeof saved.date === 'string' ? saved.date : state.date;
-          state.total = Number(saved.total) || 0;
-          state.history = Array.isArray(saved.history) ? saved.history : [];
+      var saved = JSON.parse(localStorage.getItem(KEY) || 'null');
+      if (saved && typeof saved === 'object') {
+        if (saved.days && typeof saved.days === 'object') {
+          Object.keys(saved.days).forEach(function (k) {
+            days[k] = Number(saved.days[k]) || 0;
+          });
+        } else {
+          // Older format: { date, total, history: [{ date, total }] }
+          (Array.isArray(saved.history) ? saved.history : []).forEach(function (h) {
+            if (h && typeof h.date === 'string' && !(h.date in days)) days[h.date] = Number(h.total) || 0;
+          });
+          if (typeof saved.date === 'string') days[saved.date] = Number(saved.total) || 0;
+          save(days);
         }
       }
     } catch (e) { /* corrupt or unavailable storage: start fresh */ }
-
-    // New day: archive yesterday's total and start over.
-    if (state.date !== todayKey()) {
-      state.history.unshift({ date: state.date, total: state.total });
-      state.history = state.history.slice(0, 60);
-      state.date = todayKey();
-      state.total = 0;
-      save(state);
-    }
-    return state;
+    return days;
   }
 
-  function save(state) {
-    try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) { /* ignore */ }
+  function save(days) {
+    try { localStorage.setItem(KEY, JSON.stringify({ days: days })); } catch (e) { /* ignore */ }
   }
 
   function formatDate(key) {
@@ -160,53 +192,83 @@
     return d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
   }
 
-  var state = load();
+  var days = load();
+  var selected = null; // null = today, so it follows midnight; otherwise a past "YYYY-MM-DD"
+
+  var labelEl = document.getElementById('label');
   var totalEl = document.getElementById('total');
-  var todayEl = document.getElementById('today');
+  var dayEl = document.getElementById('day');
+  var backEl = document.getElementById('back');
+  var resetEl = document.getElementById('reset');
   var historyEl = document.getElementById('history');
   var emptyEl = document.getElementById('empty');
   var amountEl = document.getElementById('amount');
 
+  function currentDay() { return selected || todayKey(); }
+
+  function select(key) {
+    selected = key && key < todayKey() ? key : null;
+    render();
+  }
+
   function render() {
-    totalEl.textContent = state.total;
-    todayEl.textContent = formatDate(state.date);
+    var today = todayKey();
+    var day = currentDay();
+
+    labelEl.textContent = selected ? formatDate(day) : 'Today';
+    totalEl.textContent = days[day] || 0;
+    dayEl.value = day;
+    dayEl.max = today;
+    backEl.hidden = !selected;
+    resetEl.textContent = selected ? 'Reset this day' : 'Reset today';
+
+    var past = Object.keys(days).filter(function (k) { return k < today; }).sort().reverse();
     historyEl.innerHTML = '';
-    state.history.forEach(function (day) {
+    past.forEach(function (key) {
       var li = document.createElement('li');
+      var row = document.createElement('button');
+      row.type = 'button';
+      row.setAttribute('aria-current', key === selected ? 'true' : 'false');
       var d = document.createElement('span');
-      d.textContent = formatDate(day.date);
+      d.textContent = formatDate(key);
       var t = document.createElement('span');
-      t.textContent = day.total;
-      li.appendChild(d);
-      li.appendChild(t);
+      t.textContent = days[key];
+      row.appendChild(d);
+      row.appendChild(t);
+      row.addEventListener('click', function () {
+        select(key);
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      });
+      li.appendChild(row);
       historyEl.appendChild(li);
     });
-    emptyEl.hidden = state.history.length > 0;
+    emptyEl.hidden = past.length > 0;
   }
+
+  dayEl.addEventListener('change', function () { select(dayEl.value); });
+  backEl.addEventListener('click', function () { select(null); });
 
   document.getElementById('add').addEventListener('submit', function (e) {
     e.preventDefault();
     var n = Number(amountEl.value);
     if (!isFinite(n) || n === 0) return;
-    state.total += Math.round(n);
-    save(state);
+    var day = currentDay();
+    days[day] = (days[day] || 0) + Math.round(n);
+    save(days);
     render();
     amountEl.value = '';
     amountEl.blur();
   });
 
-  document.getElementById('reset').addEventListener('click', function () {
-    state.total = 0;
-    save(state);
+  resetEl.addEventListener('click', function () {
+    delete days[currentDay()];
+    save(days);
     render();
   });
 
-  // Coming back to the tab after midnight should roll the day over.
+  // Coming back to the tab after midnight should show the new day.
   document.addEventListener('visibilitychange', function () {
-    if (!document.hidden && state.date !== todayKey()) {
-      state = load();
-      render();
-    }
+    if (!document.hidden) render();
   });
 
   render();
