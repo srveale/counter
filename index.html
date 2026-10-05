@@ -88,7 +88,13 @@
   }
   ul { list-style: none; margin: 0; padding: 0; }
   li { border-bottom: 1px solid var(--line); }
-  #empty { color: var(--muted); font-size: 14px; }
+  #empty, #avg-note { color: var(--muted); font-size: 14px; margin: 0; }
+  #avg {
+    font-size: 32px;
+    font-weight: 700;
+    margin: 0 0 2px;
+    font-variant-numeric: tabular-nums;
+  }
   .day {
     display: flex;
     align-items: center;
@@ -142,6 +148,10 @@
     <button type="submit">Add</button>
   </form>
   <button id="reset" type="button">Reset today</button>
+
+  <h2>7-day average</h2>
+  <p id="avg">—</p>
+  <p id="avg-note"></p>
 
   <h2>Previous days</h2>
   <ul id="history"></ul>
@@ -202,6 +212,8 @@
   var resetEl = document.getElementById('reset');
   var historyEl = document.getElementById('history');
   var emptyEl = document.getElementById('empty');
+  var avgEl = document.getElementById('avg');
+  var avgNoteEl = document.getElementById('avg-note');
   var amountEl = document.getElementById('amount');
 
   function currentDay() { return selected || todayKey(); }
@@ -209,6 +221,19 @@
   function select(key) {
     selected = key && key < todayKey() ? key : null;
     render();
+  }
+
+  // Average of the 7 days before today. Today is still in progress, and
+  // days with nothing logged are skipped rather than counted as zero.
+  function weekAverage() {
+    var sum = 0, logged = 0;
+    for (var i = 1; i <= 7; i++) {
+      var d = new Date();
+      d.setDate(d.getDate() - i);
+      var total = days[dateKey(d)];
+      if (total > 0) { sum += total; logged++; }
+    }
+    return { value: logged ? Math.round(sum / logged) : null, logged: logged };
   }
 
   function render() {
@@ -221,6 +246,11 @@
     dayEl.max = today;
     backEl.hidden = !selected;
     resetEl.textContent = selected ? 'Reset this day' : 'Reset today';
+
+    var avg = weekAverage();
+    avgEl.textContent = avg.value === null ? '—' : avg.value;
+    avgNoteEl.textContent = avg.logged === 0 ? 'Nothing logged in the past 7 days'
+      : 'Past 7 days, not counting today' + (avg.logged < 7 ? ' · ' + avg.logged + ' of 7 logged' : '');
 
     var past = Object.keys(days).filter(function (k) { return k < today; }).sort().reverse();
     historyEl.innerHTML = '';
